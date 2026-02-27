@@ -3,7 +3,7 @@
 """
 Orbbec Gemini 335L Camera Monitor — StereoVR Tool
 
-Live RGB + IR preview via WebSocket, reusing orbbec_monitor.html frontend.
+Live RGB + IR preview via WebSocket, using monitor.html frontend.
 Left view = RGB color, Right view = IR grayscale.
 Uses plain OpenCV UVC — no Orbbec SDK required.
 
@@ -526,8 +526,8 @@ class OrbbecMonitorServer:
         if self.ir_available:
             print(f"  IR Dev  : /dev/video{self.ir_device}")
         print(f"  WSS     : wss://localhost:{self.port}")
-        print(f"  Access  : https://localhost:{MONITOR_HTTPS_PORT}/orbbec_monitor.html")
-        print(f"  WiFi    : https://{local_ip}:{MONITOR_HTTPS_PORT}/orbbec_monitor.html")
+        print(f"  Access  : https://localhost:{MONITOR_HTTPS_PORT}/monitor.html")
+        print(f"  WiFi    : https://{local_ip}:{MONITOR_HTTPS_PORT}/monitor.html")
         print("=" * 60)
         print("  View: Left = RGB Color | Right = IR Grayscale")
         print("=" * 60 + "\n")

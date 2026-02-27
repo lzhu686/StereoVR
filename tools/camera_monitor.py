@@ -547,8 +547,8 @@ class CameraMonitorServer:
         print(f"  Camera : {self.camera_model}")
         print(f"  Mode   : {self.current_resolution} @ {self.current_fps}fps")
         print(f"  WSS    : wss://localhost:{self.port}")
-        print(f"  Access : https://localhost:{MONITOR_HTTPS_PORT}")
-        print(f"  WiFi   : https://{local_ip}:{MONITOR_HTTPS_PORT}")
+        print(f"  Access : https://localhost:{MONITOR_HTTPS_PORT}/monitor.html")
+        print(f"  WiFi   : https://{local_ip}:{MONITOR_HTTPS_PORT}/monitor.html")
         print("=" * 60 + "\n")
 
         server = await websockets.serve(

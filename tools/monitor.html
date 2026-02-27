@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Orbbec Gemini 335L Monitor</title>
+<title>Camera Monitor</title>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; }
@@ -39,11 +39,9 @@
     .mode-section { display: flex; flex-direction: column; gap: 8px; }
     .mode-label { font-size: 11px; color: #8899aa; margin-bottom: 2px; }
     .mode-row { display: flex; gap: 5px; flex-wrap: wrap; }
-    .mode-btn { padding: 7px 10px; border: 2px solid #0f3460; border-radius: 6px; background: transparent; color: #8899aa; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; text-align: center; min-width: 80px; }
+    .mode-btn { padding: 7px 10px; border: 2px solid #0f3460; border-radius: 6px; background: transparent; color: #8899aa; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; text-align: center; min-width: 70px; }
     .mode-btn:hover { border-color: #e94560; color: #fff; }
     .mode-btn.active { border-color: #e94560; background: rgba(233,69,96,0.15); color: #e94560; }
-    .mode-btn .sub { font-size: 10px; color: #556; margin-top: 1px; }
-    .mode-btn.active .sub { color: #c77; }
 
     .slider-row { display: flex; align-items: center; gap: 10px; }
     .slider-row input[type=range] { flex: 1; accent-color: #e94560; }
@@ -53,16 +51,20 @@
     .action-btn { flex: 1; padding: 9px; border: 1px solid #0f3460; border-radius: 6px; background: #0f3460; color: #e0e0e0; font-size: 12px; cursor: pointer; transition: all 0.2s; }
     .action-btn:hover { background: #1a4a8a; }
 
+    select.model-select { width: 100%; padding: 8px; border: 2px solid #0f3460; border-radius: 6px; background: #0d1117; color: #e0e0e0; font-size: 13px; cursor: pointer; }
+    select.model-select:focus { border-color: #e94560; outline: none; }
+
     .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-    .badge.gs { background: rgba(76,175,80,0.2); color: #4caf50; }
-    .badge.ir { background: rgba(255,152,0,0.2); color: #ff9800; }
+    .badge.ok  { background: rgba(76,175,80,0.2);  color: #4caf50; }
+    .badge.warn{ background: rgba(255,152,0,0.2);  color: #ff9800; }
+    .hidden { display: none !important; }
 </style>
 </head>
 <body>
 <div class="header">
     <div style="display:flex;align-items:center;">
-        <h1>Orbbec Gemini 335L Monitor</h1>
-        <span class="subtitle">RGB + IR Preview</span>
+        <h1 id="headerTitle">Camera Monitor</h1>
+        <span class="subtitle" id="headerSub"></span>
     </div>
     <div class="status"><div class="status-dot" id="statusDot"></div><span id="statusText">Disconnected</span></div>
 </div>
@@ -73,32 +75,22 @@
             <div class="overlay tl" id="label">No Signal</div>
             <div class="overlay tr" id="fpsOvl">-- FPS</div>
         </div>
-        <div class="view-toggle">
-            <button class="active" onclick="setView('stereo')">RGB + IR</button>
-            <button onclick="setView('left')">RGB Only</button>
-            <button onclick="setView('right')">IR Only</button>
+        <div class="view-toggle" id="viewToggle">
+            <button class="active" onclick="setView('stereo')">Stereo (L+R)</button>
+            <button onclick="setView('left')">Left Only</button>
+            <button onclick="setView('right')">Right Only</button>
         </div>
     </div>
     <div class="panel">
         <!-- Camera Info -->
-        <div class="card">
-            <h3>Camera</h3>
-            <div class="info-grid">
-                <span class="label">Model</span><span class="value" id="infoModel">Gemini 335L</span>
-                <span class="label">Baseline</span><span class="value" id="infoBaseline">95 mm</span>
-                <span class="label">Sensor (RGB)</span><span class="value" id="infoSensorRGB">OV9782 <span class="badge gs">GS</span></span>
-                <span class="label">Sensor (IR)</span><span class="value" id="infoSensorIR">OV9282 <span class="badge gs">GS</span></span>
-                <span class="label">Shutter</span><span class="value" id="infoShutter">Global Shutter</span>
-                <span class="label">IR Stream</span><span class="value" id="infoIR"><span class="badge ir">--</span></span>
-            </div>
-        </div>
+        <div class="card" id="cameraCard"></div>
         <!-- FOV -->
         <div class="card">
             <h3>Field of View</h3>
-            <div class="info-grid">
-                <span class="label">RGB H-FOV</span><span class="value hl" id="hfov">94°</span>
-                <span class="label">RGB V-FOV</span><span class="value hl" id="vfov">68°</span>
-                <span class="label">RGB D-FOV</span><span class="value hl" id="dfov">115°</span>
+            <div class="info-grid" id="fovGrid">
+                <span class="label">H-FOV</span><span class="value hl" id="hfov">--</span>
+                <span class="label">V-FOV</span><span class="value hl" id="vfov">--</span>
+                <span class="label">D-FOV</span><span class="value hl" id="dfov">--</span>
             </div>
         </div>
         <!-- Live Stats -->
@@ -144,28 +136,83 @@
     </div>
 </div>
 <script>
-// Gemini 335L resolution modes (matches orbbec_monitor.py RGB_MODES)
-let availModes = {
-    "1280x800": [60, 30, 15],
-    "1280x720": [60, 30, 15],
-    "848x480":  [60, 30, 15],
-    "640x480":  [90, 60, 30],
-    "640x360":  [90, 60, 30]
-};
-
+/* ===== State ===== */
+let availModes = {};
 let ws = null, viewMode = 'stereo', canvas, ctx;
 let leftImg = new Image(), rightImg = new Image(), leftOk = false, rightOk = false;
 let dFpsCnt = 0, dFpsT = performance.now(), dFps = 0, reconTimer = null;
-let curRes = '1280x800', curFps = 30;
+let curRes = '', curFps = 0;
+let camType = '';  // 'orbbec' | 'stereo'
 
+/* ===== Init ===== */
 window.addEventListener('DOMContentLoaded', () => {
     canvas = document.getElementById('canvas');
     ctx = canvas.getContext('2d');
-    buildResButtons();
-    renderFps(curRes, curFps);
     connect();
 });
 
+/* ===== Camera type detection & UI adaptation ===== */
+function detectType(d) {
+    const m = (d.model || '').toLowerCase();
+    if (m.includes('gemini') || m.includes('orbbec') || d.ir_available !== undefined) return 'orbbec';
+    return 'stereo';
+}
+
+function applyLayout(type) {
+    if (type === camType) return;
+    camType = type;
+
+    const toggle = document.getElementById('viewToggle');
+    const btns = toggle.querySelectorAll('button');
+    if (type === 'orbbec') {
+        document.getElementById('headerTitle').textContent = 'Orbbec Monitor';
+        document.getElementById('headerSub').textContent = 'RGB + IR Preview';
+        btns[0].textContent = 'RGB + IR';
+        btns[1].textContent = 'RGB Only';
+        btns[2].textContent = 'IR Only';
+    } else {
+        document.getElementById('headerTitle').textContent = 'Camera Monitor';
+        document.getElementById('headerSub').textContent = 'Stereo Preview';
+        btns[0].textContent = 'Stereo (L+R)';
+        btns[1].textContent = 'Left Only';
+        btns[2].textContent = 'Right Only';
+    }
+}
+
+function buildCameraCard(d) {
+    const card = document.getElementById('cameraCard');
+    if (camType === 'orbbec') {
+        const irOk = d.ir_available;
+        const irBadge = irOk
+            ? '<span class="badge ok">Active</span>'
+            : '<span class="badge warn">Unavailable</span>';
+        card.innerHTML = `
+            <h3>Camera</h3>
+            <div class="info-grid">
+                <span class="label">Model</span><span class="value" id="infoModel">${d.model || '--'}</span>
+                <span class="label">Baseline</span><span class="value">${d.baseline ? d.baseline + ' mm' : '--'}</span>
+                <span class="label">Sensor</span><span class="value">${d.sensor || '--'}</span>
+                <span class="label">Shutter</span><span class="value">${d.shutter || 'Global Shutter'}</span>
+                <span class="label">IR Stream</span><span class="value">${irBadge}</span>
+            </div>`;
+    } else {
+        // Stereo camera — show model dropdown
+        const models = ['ZED Mini', 'ZED 2i (2.1mm)', 'ZED 2i (4mm)', 'Generic Stereo'];
+        let sel = (d.model || '').replace(/^Test Mode \(/, '').replace(/\)$/, '');
+        const opts = models.map(m =>
+            `<option value="${m}"${m === sel ? ' selected' : ''}>${m}</option>`
+        ).join('');
+        card.innerHTML = `
+            <h3>Camera Model</h3>
+            <select class="model-select" id="modelSelect" onchange="changeModel(this.value)">${opts}</select>
+            <div class="info-grid" style="margin-top:10px">
+                <span class="label">Baseline</span><span class="value" id="infoBaseline">${d.baseline ? d.baseline + ' mm' : '--'}</span>
+                <span class="label">Sensor</span><span class="value" id="infoSensor">${d.sensor || '--'}</span>
+            </div>`;
+    }
+}
+
+/* ===== Resolution / FPS buttons ===== */
 function buildResButtons() {
     const row = document.getElementById('resRow');
     row.innerHTML = '';
@@ -173,7 +220,7 @@ function buildResButtons() {
         const b = document.createElement('button');
         b.className = 'mode-btn' + (res === curRes ? ' active' : '');
         b.dataset.res = res;
-        b.innerHTML = res;
+        b.textContent = res;
         b.onclick = () => selectRes(res);
         row.appendChild(b);
     }
@@ -192,6 +239,7 @@ function renderFps(res, active) {
     });
 }
 
+/* ===== WebSocket ===== */
 function connect() {
     const p = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${p}//${location.hostname}:8767`);
@@ -218,22 +266,21 @@ function setStatus(s, t) {
     document.getElementById('statusText').textContent = t;
 }
 
+/* ===== Update info from backend ===== */
 function updateInfo(d) {
-    if (d.model) document.getElementById('infoModel').textContent = d.model;
-    if (d.baseline) document.getElementById('infoBaseline').textContent = d.baseline + ' mm';
+    const type = detectType(d);
+    applyLayout(type);
+    buildCameraCard(d);
+
+    // FOV
     document.getElementById('hfov').textContent = d.h_fov ? d.h_fov + '\u00B0' : 'N/A';
     document.getElementById('vfov').textContent = d.v_fov ? d.v_fov + '\u00B0' : 'N/A';
     document.getElementById('dfov').textContent = d.d_fov ? d.d_fov + '\u00B0' : 'N/A';
+
+    // Resolution
     document.getElementById('sRes').textContent = d.width && d.height ? d.width + 'x' + d.height : '--';
 
-    // IR status badge
-    const irBadge = document.getElementById('infoIR');
-    if (d.ir_available) {
-        irBadge.innerHTML = '<span class="badge gs">Active</span>';
-    } else {
-        irBadge.innerHTML = '<span class="badge ir">Unavailable</span>';
-    }
-
+    // Modes
     if (d.available_modes) {
         availModes = d.available_modes;
         buildResButtons();
@@ -242,10 +289,13 @@ function updateInfo(d) {
     if (d.fps_target) curFps = d.fps_target;
     document.querySelectorAll('#resRow .mode-btn').forEach(b => b.classList.toggle('active', b.dataset.res === curRes));
     renderFps(curRes, curFps);
-    document.getElementById('label').textContent = `${d.model || 'Gemini 335L'} | ${curRes} @${curFps}fps`;
+
+    // Overlay label
+    document.getElementById('label').textContent = `${d.model || 'Camera'} | ${curRes} @${curFps}fps`;
     setStatus('connected', 'Connected');
 }
 
+/* ===== Frame rendering ===== */
 function renderFrame(m) {
     const s = m.stats || {};
     document.getElementById('sFps').textContent = (s.fps_actual || 0) + ' fps';
@@ -288,6 +338,7 @@ function draw() {
     }
 }
 
+/* ===== Controls ===== */
 function setView(m) {
     viewMode = m;
     document.querySelectorAll('.view-toggle button').forEach((b, i) =>
@@ -321,6 +372,10 @@ function setQuality(v) {
 
 function snapshot() {
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'snapshot' }));
+}
+
+function changeModel(m) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'set_camera_model', model: m }));
 }
 </script>
 </body>
