@@ -588,7 +588,10 @@ class MonitorServer:
                 time.sleep(0.05)
                 continue
 
-            result = self.backend.read_frames()
+            try:
+                result = self.backend.read_frames()
+            except Exception:
+                break
             if result is None:
                 time.sleep(0.001)
                 continue
@@ -809,9 +812,16 @@ class MonitorServer:
             self.handle_client, "0.0.0.0", self.port,
             ssl=ssl_ctx, ping_interval=20, ping_timeout=10,
         )
+        # First Ctrl+C: graceful shutdown. Second: force exit.
+        self._got_signal = False
         loop = asyncio.get_event_loop()
+        def _on_signal():
+            if self._got_signal:
+                os._exit(0)
+            self._got_signal = True
+            self.ws_server.close()
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, self.ws_server.close)
+            loop.add_signal_handler(sig, _on_signal)
         await self.ws_server.wait_closed()
 
     def cleanup(self):
@@ -819,9 +829,10 @@ class MonitorServer:
         self.is_running = False
         if hasattr(self, 'ws_server') and self.ws_server:
             self.ws_server.close()
-        if self.camera_thread:
-            self.camera_thread.join(timeout=3)
+        # Release camera first — this unblocks cap.read() in capture thread
         self.backend.close()
+        if self.camera_thread:
+            self.camera_thread.join(timeout=2)
         print("  Camera released, ports freed. Ready to restart.")
         logger.info("Cleanup done")
 
