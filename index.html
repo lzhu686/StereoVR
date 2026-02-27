@@ -22,7 +22,7 @@
         }
 
         .container {
-            max-width: 800px;
+            max-width: 1100px;
             padding: 40px;
             text-align: center;
         }
@@ -51,7 +51,7 @@
 
         .options {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(3, 1fr);
             gap: 30px;
             margin-bottom: 40px;
         }
@@ -167,7 +167,7 @@
             color: #fff;
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 960px) {
             .options {
                 grid-template-columns: 1fr;
             }
@@ -228,6 +228,25 @@
                     进入VR模式
                 </a>
             </div>
+
+            <!-- 相机性能监测 -->
+            <div class="option-card" onclick="window.open('https://' + location.hostname + ':8447/camera_monitor.html', '_blank')" style="border: 1px solid rgba(233, 69, 96, 0.4);">
+                <div class="option-icon">📊</div>
+                <div class="option-title">相机性能监测</div>
+                <div class="option-description">
+                    测试和对比立体相机参数，支持ZED Mini / ZED 2i等型号
+                </div>
+                <ul class="option-features">
+                    <li>分辨率/帧率切换测试</li>
+                    <li>FOV参数显示</li>
+                    <li>实时性能统计</li>
+                    <li>多相机型号对比</li>
+                    <li>截图保存功能</li>
+                </ul>
+                <a href="#" class="btn" style="background: linear-gradient(45deg, #e94560, #c23152);" onclick="event.stopPropagation(); window.open('https://' + location.hostname + ':8447/camera_monitor.html', '_blank');">
+                    打开性能监测
+                </a>
+            </div>
         </div>
 
         <div class="info-panel">
@@ -235,6 +254,9 @@
             <p style="margin: 15px 0; opacity: 0.9;">视频流使用WSS加密传输，需要单独信任证书才能连接</p>
             <a id="trustCertBtn" class="btn" style="background: linear-gradient(45deg, #FF9800, #F57C00);">
                 点击信任WSS证书 (端口8765)
+            </a>
+            <a id="trustMonitorCertBtn" class="btn" style="background: linear-gradient(45deg, #e94560, #c23152); margin-left: 10px;">
+                信任监测工具证书 (端口8767)
             </a>
             <p style="margin-top: 10px; font-size: 0.85em; opacity: 0.7;">
                 点击后会打开新页面，选择"高级"→"继续前往"即可
@@ -279,6 +301,11 @@
         trustBtn.href = `https://${host}:8765`;
         trustBtn.target = '_blank';
         trustBtn.onclick = () => window.open(`https://${host}:8765`, '_blank');
+
+        const trustMonitorBtn = document.getElementById('trustMonitorCertBtn');
+        trustMonitorBtn.href = `https://${host}:8767`;
+        trustMonitorBtn.target = '_blank';
+        trustMonitorBtn.onclick = () => window.open(`https://${host}:8767`, '_blank');
 
         // 检测VR支持
         if ('xr' in navigator) {

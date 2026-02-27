@@ -19,3 +19,7 @@ Thumbs.db
 
 # 日志
 *.log
+
+# 快照截图
+tools/snapshots/
+snapshots/

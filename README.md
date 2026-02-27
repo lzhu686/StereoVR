@@ -83,7 +83,7 @@ VR浏览器 → 127.0.0.1:8445 → USB线 → PC服务器
 ## 📁 项目结构
 
 ```
-SteroVR/
+StereoVR/
 ├── start.py              # 🚀 主启动脚本（只需运行这个！）
 ├── server.py             # WebSocket 服务器核心代码
 ├── index.html            # 🏠 主页导航（VR设备访问入口）
@@ -94,9 +94,105 @@ SteroVR/
 │   ├── dual_infrared_viewer.html      # 普通2D查看器
 │   └── dual_infrared_vr_viewer.html   # VR 立体查看器
 │
+├── tools/                # 扩展工具
+│   ├── camera_monitor.py             # 📊 相机性能监测服务器
+│   └── camera_monitor.html           # 📊 相机性能监测面板
+│
 ├── server.crt            # SSL 证书（自动生成）
 └── server.key            # SSL 私钥（自动生成）
 ```
+
+## 📊 相机性能监测工具
+
+独立的相机测试工具，用于测量和对比立体相机的 FOV、分辨率、帧率等参数。
+
+### 支持的相机
+
+| 相机型号 | 基线距离 | H-FOV (HD720) | 备注 |
+|---------|---------|---------------|------|
+| ZED Mini | 63 mm | 85° | 推荐桌面级遥操作 |
+| ZED 2i (2.1mm) | 120 mm | 100° | 超广角 |
+| ZED 2i (4mm) | 120 mm | 65° | 窄角高清 |
+
+### 启动方式
+
+```bash
+# 默认使用 /dev/video0
+python tools/camera_monitor.py
+
+# 指定设备索引
+python tools/camera_monitor.py --device 2
+```
+
+访问 `https://localhost:8447/camera_monitor.html` 打开监测面板。
+
+### ZED 相机 USB 连接要求
+
+**ZED 相机必须通过 USB 3.0 连接**，USB 2.0 下只会出现 HID 设备（IMU），不会注册为 UVC 视频设备。
+
+```bash
+# 检查 USB 连接状态
+lsusb
+# 正确: Bus 002 (USB 3.0) 上出现 STEREOLABS ZED-M
+# 错误: Bus 001 (USB 2.0) 上只有 ZED-M HID Interface
+
+# 验证视频设备已创建
+ls /dev/video*
+
+# 查看 USB 总线速度
+lsusb -t
+# ZED 应显示 5000M (USB 3.0)，而非 480M (USB 2.0)
+```
+
+**常见连接问题：**
+
+| 现象 | 原因 | 解决方法 |
+|------|------|---------|
+| `lsusb` 显示 `ZED-M HID Interface` 但无 `/dev/video*` | 连接在 USB 2.0 端口 | 改插 USB 3.0 端口（蓝色口） |
+| `lsusb` 中完全看不到 ZED | USB Hub 供电不足 | 直连主板 USB 口，不用扩展坞 |
+| TypeC 扩展坞连接无反应 | Hub 芯片兼容性问题 | 直连后面板 USB-A 3.0 口 |
+
+### OpenCV UVC 模式（无需 ZED SDK）
+
+本工具使用 OpenCV 直接通过 UVC 协议读取 ZED 相机，**不需要安装 ZED SDK 和 NVIDIA GPU**。ZED 相机在 UVC 模式下输出左右拼接的 side-by-side 立体帧：
+
+```
+                    stereo_frame (side-by-side)
+┌──────────────────────┬──────────────────────┐
+│      Left Eye        │      Right Eye       │
+│   (width/2 x height) │  (width/2 x height)  │
+└──────────────────────┴──────────────────────┘
+```
+
+OpenCV 配置参数：
+
+```python
+cap = cv2.VideoCapture(device_index)
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))  # MJPG 编码
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, stereo_width)   # 双目拼接宽度
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+cap.set(cv2.CAP_PROP_FPS, fps)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 最小缓冲，降低延迟
+```
+
+### 分辨率与 FOV 对照表（ZED Mini）
+
+| 模式 | 单眼分辨率 | 双目拼接宽度 | 可选帧率 | H-FOV | V-FOV | D-FOV |
+|------|-----------|------------|---------|-------|-------|-------|
+| VGA | 672×376 | 1344 | 100/60/30/15 | 85° | 54° | 95° |
+| **HD720** | **1280×720** | **2560** | **60/30/15** | **85°** | **54°** | **95°** |
+| HD1080 | 1920×1080 | 3840 | 30/15 | 80° | 50° | 90° |
+| HD2K | 2208×1242 | 4416 | 15 | 78° | 48° | 88° |
+
+> **推荐：HD720 @ 60fps** — 最大 FOV (85°) + 足够分辨率 + 60fps 流畅度。
+> VGA 和 HD720 共享相同传感器读取区域，FOV 一致；HD1080/HD2K 使用 sensor crop 模式，视角更窄。
+
+### 监测工具端口
+
+| 端口 | 用途 | 协议 |
+|------|------|------|
+| 8447 | 监测面板文件服务器 | HTTPS |
+| 8767 | 监测视频流传输 | WSS |
 
 ## ⚙️ 配置参数
 
