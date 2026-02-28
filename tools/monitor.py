@@ -3,14 +3,16 @@
 """
 Unified Camera Monitor — StereoVR Tool
 
-Auto-detects connected camera (ZED stereo / Orbbec Gemini 335L) and serves
-a live preview via WebSocket + HTTPS. Uses monitor.html frontend which
-auto-adapts to camera type.
+Auto-detects connected camera and serves a live preview via WebSocket + HTTPS.
+Supports HBVCAM / ZED / Orbbec / RealSense cameras. Uses monitor.html frontend
+which auto-adapts to camera type (stereo / single).
 
 Usage:
     python tools/monitor.py                              # auto-detect
+    python tools/monitor.py --type hbvcam --device 0     # force HBVCAM
     python tools/monitor.py --type zed --device 0        # force ZED
     python tools/monitor.py --type orbbec --rgb 6        # force Orbbec
+    python tools/monitor.py --type realsense --device 6  # force RealSense D405
 
 Author: Liang ZHU
 """

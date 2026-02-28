@@ -23,3 +23,7 @@ Thumbs.db
 # 快照截图
 tools/snapshots/
 snapshots/
+
+# 测试结果
+tools/test_results_*.json
+tools/camera_test_results.json
