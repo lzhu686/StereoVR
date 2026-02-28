@@ -327,6 +327,7 @@ def _detect_zed_model():
 
 def auto_detect_orbbec():
     """Find Orbbec RGB device index. Returns rgb_idx or None."""
+    orbbec_indices = []
     for path in sorted(globmod.glob("/sys/class/video4linux/video*/name")):
         try:
             with open(path) as f:
@@ -334,6 +335,16 @@ def auto_detect_orbbec():
             if "orbbec" not in name and "gemini" not in name:
                 continue
             idx = int(path.split("video4linux/video")[1].split("/")[0])
+            orbbec_indices.append(idx)
+        except Exception:
+            continue
+
+    if not orbbec_indices:
+        return None
+
+    # Try v4l2-ctl first (if available)
+    for idx in orbbec_indices:
+        try:
             result = subprocess.run(
                 ["v4l2-ctl", "-d", f"/dev/video{idx}", "--list-formats"],
                 capture_output=True, text=True, timeout=3
@@ -342,8 +353,33 @@ def auto_detect_orbbec():
             if ("YUYV" in fmts or "MJPG" in fmts) and "Z16" not in fmts and "GREY" not in fmts and "BA81" not in fmts:
                 logger.info(f"Auto-detected Orbbec RGB=/dev/video{idx}")
                 return idx
+        except FileNotFoundError:
+            break  # v4l2-ctl not installed, fall through
         except Exception:
             continue
+
+    # Fallback: probe with OpenCV in a subprocess with timeout
+    import concurrent.futures
+
+    def _probe_orbbec(idx):
+        """Probe a single device in subprocess to avoid V4L2 select() hangs."""
+        try:
+            result = subprocess.run(
+                ["python3", "-c",
+                 f"import cv2; cap=cv2.VideoCapture({idx},cv2.CAP_V4L2); "
+                 f"ok=cap.isOpened(); ret,f=cap.read() if ok else (False,None); cap.release(); "
+                 f"print('RGB' if ret and f is not None and len(f.shape)==3 and f.shape[2]==3 else 'NO')"],
+                capture_output=True, text=True, timeout=5
+            )
+            return "RGB" in result.stdout
+        except Exception:
+            return False
+
+    for idx in orbbec_indices:
+        if _probe_orbbec(idx):
+            logger.info(f"Auto-detected Orbbec RGB=/dev/video{idx} (probe)")
+            return idx
+
     return None
 
 
@@ -612,6 +648,9 @@ class SingleCameraBackend:
         rgb_path = f"/dev/video{self.rgb_device}"
         self.rgb_cap = cv2.VideoCapture(rgb_path, cv2.CAP_V4L2)
         if not self.rgb_cap.isOpened():
+            # Fallback: integer index with V4L2 backend
+            self.rgb_cap = cv2.VideoCapture(self.rgb_device, cv2.CAP_V4L2)
+        if not self.rgb_cap.isOpened():
             logger.warning(f"Cannot open {self.camera_model}, using test mode")
             self.test_mode = True
             self.current_resolution = resolution
@@ -764,12 +803,17 @@ class MonitorServer:
         # Snapshot
         self.snapshot_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "snapshots")
 
+        # Hot-plug reconnect state
+        self.disconnected = False
+
     # ---- Capture Thread ----
 
     def camera_thread_fn(self):
         logger.info("Capture thread started")
         fps_counter = 0
         fps_timer = time.time()
+        fail_count = 0
+        MAX_FAIL = 30  # ~0.5s of consecutive failures triggers reconnect
 
         while self.is_running:
             loop_start = time.time()
@@ -780,11 +824,22 @@ class MonitorServer:
 
             try:
                 result = self.backend.read_frames()
-            except Exception:
-                break
+            except Exception as e:
+                logger.debug(f"read_frames exception: {e}")
+                result = None
+
             if result is None:
-                time.sleep(0.001)
+                fail_count += 1
+                if fail_count > MAX_FAIL:
+                    self._reconnect()
+                    fail_count = 0
+                    fps_counter = 0
+                    fps_timer = time.time()
+                else:
+                    time.sleep(0.01)
                 continue
+
+            fail_count = 0
             left, right = result
 
             with self.frame_lock:
@@ -806,6 +861,52 @@ class MonitorServer:
                 time.sleep(target_interval - elapsed)
 
         logger.info("Capture thread stopped")
+
+    def _reconnect(self):
+        """Attempt to reconnect to the camera after disconnect."""
+        self.disconnected = True
+        logger.warning("Camera disconnected, attempting reconnect...")
+
+        res = self.backend.current_resolution
+        fps = self.backend.current_fps
+
+        while self.is_running:
+            try:
+                self.backend.close()
+            except Exception:
+                pass
+
+            time.sleep(2)
+
+            if not self.is_running:
+                break
+
+            try:
+                opened = self.backend.open(res, fps)
+                # open() may fall back to test_mode — that's not a real reconnect
+                if opened and not getattr(self.backend, 'test_mode', False):
+                    # Verify with a test read
+                    test = self.backend.read_frames()
+                    if test is not None:
+                        with self.frame_lock:
+                            self.latest_left = test[0].copy()
+                            self.latest_right = test[1].copy()
+                            self.frame_id += 1
+                        self.disconnected = False
+                        self.camera_info = self.backend.build_camera_info()
+                        logger.info("Camera reconnected successfully")
+                        return
+                    else:
+                        # open succeeded but read failed, close and retry
+                        self.backend.close()
+                else:
+                    # Opened in test mode — not a real camera, close and retry
+                    if opened:
+                        self.backend.close()
+            except Exception as e:
+                logger.warning(f"Reconnect attempt failed: {e}")
+
+            logger.info("Reconnect failed, retrying in 2s...")
 
     # ---- Snapshot ----
 
@@ -851,8 +952,31 @@ class MonitorServer:
 
             last_sent_id = -1
             send_interval = 1.0 / 60
+            was_disconnected = False
 
             while True:
+                # Send camera disconnect/reconnect status
+                if self.disconnected and not was_disconnected:
+                    was_disconnected = True
+                    try:
+                        await websocket.send(json.dumps({
+                            "type": "status", "status": "disconnected"
+                        }))
+                    except Exception:
+                        break
+                elif not self.disconnected and was_disconnected:
+                    was_disconnected = False
+                    try:
+                        await websocket.send(json.dumps({
+                            "type": "status", "status": "reconnected"
+                        }))
+                        # Re-send updated camera info after reconnect
+                        await websocket.send(json.dumps({
+                            "type": "camera_info", "data": self.camera_info
+                        }))
+                    except Exception:
+                        break
+
                 with self.frame_lock:
                     left = self.latest_left
                     right = self.latest_right
