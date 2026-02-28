@@ -14,6 +14,7 @@
     .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #555; }
     .status-dot.connected { background: #4caf50; }
     .status-dot.switching { background: #ff9800; animation: pulse 0.8s infinite; }
+    .status-dot.disconnected { background: #f44336; animation: pulse 0.8s infinite; }
     @keyframes pulse { 50% { opacity: 0.3; } }
 
     .main { display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; height: calc(100vh - 56px); }
@@ -240,6 +241,8 @@ function connect() {
         if (m.type === 'camera_info' || m.type === 'mode_changed') updateInfo(m.data);
         else if (m.type === 'frame') renderFrame(m);
         else if (m.type === 'switching') setStatus('switching', `Switching to ${m.resolution}@${m.fps}fps...`);
+        else if (m.type === 'status' && m.status === 'disconnected') setStatus('disconnected', 'Camera disconnected, reconnecting...');
+        else if (m.type === 'status' && m.status === 'reconnected') setStatus('connected', 'Camera reconnected');
         else if (m.type === 'snapshot_result') alert(m.data ? 'Saved:\n' + m.data.stereo + '\n' + m.data.left + '\n' + m.data.right : 'Snapshot failed');
     };
 }
