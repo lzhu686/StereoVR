@@ -142,7 +142,7 @@ let ws = null, viewMode = 'stereo', canvas, ctx;
 let leftImg = new Image(), rightImg = new Image(), leftOk = false, rightOk = false;
 let dFpsCnt = 0, dFpsT = performance.now(), dFps = 0, reconTimer = null;
 let curRes = '', curFps = 0;
-let camType = '';  // 'orbbec' | 'stereo'
+let camType = '';  // 'single' | 'stereo'
 
 /* ===== Init ===== */
 window.addEventListener('DOMContentLoaded', () => {
@@ -154,24 +154,27 @@ window.addEventListener('DOMContentLoaded', () => {
 /* ===== Camera type detection & UI adaptation ===== */
 function detectType(d) {
     const m = (d.model || '').toLowerCase();
-    if (m.includes('gemini') || m.includes('orbbec') || d.ir_available !== undefined) return 'orbbec';
+    // Single-camera (non-stereo): Orbbec, RealSense, etc.
+    if (m.includes('gemini') || m.includes('orbbec') || m.includes('realsense') || m.includes('d405')) return 'single';
     return 'stereo';
 }
 
-function applyLayout(type) {
+function applyLayout(type, d) {
+    // Always update title with actual model name
+    const model = (d.model || 'Camera').replace(/^Test Mode \(/, '').replace(/\)$/, '');
+    document.getElementById('headerTitle').textContent = model + ' Monitor';
+
     if (type === camType) return;
     camType = type;
 
     const toggle = document.getElementById('viewToggle');
     const btns = toggle.querySelectorAll('button');
-    if (type === 'orbbec') {
-        document.getElementById('headerTitle').textContent = 'Orbbec Monitor';
-        document.getElementById('headerSub').textContent = 'RGB + IR Preview';
-        btns[0].textContent = 'RGB + IR';
-        btns[1].textContent = 'RGB Only';
-        btns[2].textContent = 'IR Only';
+    if (type === 'single') {
+        document.getElementById('headerSub').textContent = 'RGB Preview';
+        btns[0].textContent = 'Full Frame';
+        btns[1].textContent = 'Left Half';
+        btns[2].textContent = 'Right Half';
     } else {
-        document.getElementById('headerTitle').textContent = 'Camera Monitor';
         document.getElementById('headerSub').textContent = 'Stereo Preview';
         btns[0].textContent = 'Stereo (L+R)';
         btns[1].textContent = 'Left Only';
@@ -181,35 +184,15 @@ function applyLayout(type) {
 
 function buildCameraCard(d) {
     const card = document.getElementById('cameraCard');
-    if (camType === 'orbbec') {
-        const irOk = d.ir_available;
-        const irBadge = irOk
-            ? '<span class="badge ok">Active</span>'
-            : '<span class="badge warn">Unavailable</span>';
-        card.innerHTML = `
-            <h3>Camera</h3>
-            <div class="info-grid">
-                <span class="label">Model</span><span class="value" id="infoModel">${d.model || '--'}</span>
-                <span class="label">Baseline</span><span class="value">${d.baseline ? d.baseline + ' mm' : '--'}</span>
-                <span class="label">Sensor</span><span class="value">${d.sensor || '--'}</span>
-                <span class="label">Shutter</span><span class="value">${d.shutter || 'Global Shutter'}</span>
-                <span class="label">IR Stream</span><span class="value">${irBadge}</span>
-            </div>`;
-    } else {
-        // Stereo camera — show model dropdown
-        const models = ['ZED Mini', 'ZED 2i (2.1mm)', 'ZED 2i (4mm)', 'Generic Stereo'];
-        let sel = (d.model || '').replace(/^Test Mode \(/, '').replace(/\)$/, '');
-        const opts = models.map(m =>
-            `<option value="${m}"${m === sel ? ' selected' : ''}>${m}</option>`
-        ).join('');
-        card.innerHTML = `
-            <h3>Camera Model</h3>
-            <select class="model-select" id="modelSelect" onchange="changeModel(this.value)">${opts}</select>
-            <div class="info-grid" style="margin-top:10px">
-                <span class="label">Baseline</span><span class="value" id="infoBaseline">${d.baseline ? d.baseline + ' mm' : '--'}</span>
-                <span class="label">Sensor</span><span class="value" id="infoSensor">${d.sensor || '--'}</span>
-            </div>`;
-    }
+    let rows = `
+        <span class="label">Model</span><span class="value">${d.model || '--'}</span>`;
+    if (d.baseline) rows += `
+        <span class="label">Baseline</span><span class="value">${d.baseline} mm</span>`;
+    rows += `
+        <span class="label">Sensor</span><span class="value">${d.sensor || '--'}</span>`;
+    if (d.shutter) rows += `
+        <span class="label">Shutter</span><span class="value">${d.shutter}</span>`;
+    card.innerHTML = `<h3>Camera</h3><div class="info-grid">${rows}</div>`;
 }
 
 /* ===== Resolution / FPS buttons ===== */
@@ -269,7 +252,7 @@ function setStatus(s, t) {
 /* ===== Update info from backend ===== */
 function updateInfo(d) {
     const type = detectType(d);
-    applyLayout(type);
+    applyLayout(type, d);
     buildCameraCard(d);
 
     // FOV

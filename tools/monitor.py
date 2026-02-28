@@ -94,21 +94,75 @@ ZED_MODES = {
 
 # Orbbec Gemini 335L specs
 ORBBEC_SPECS = {
-    "baseline_mm": 95.0,
+    "model": "Gemini 335L",
     "sensor": "RGB: OV9782 GS / IR: OV9282 GS",
     "shutter": "Global Shutter",
-    "fov": {
-        "color": {"h_fov": 94.0, "v_fov": 68.0, "d_fov": 115.0},
-        "depth": {"h_fov": 90.0, "v_fov": 65.0, "d_fov": 108.0},
-    },
+    "h_fov": 94.0, "v_fov": 68.0, "d_fov": 115.0,
+    "fourcc": "MJPG",
 }
 
 ORBBEC_MODES = {
-    "1280x800":  {"width": 1280, "height": 800, "fps_options": [60, 30, 15]},
-    "1280x720":  {"width": 1280, "height": 720, "fps_options": [60, 30, 15]},
-    "848x480":   {"width": 848,  "height": 480, "fps_options": [60, 30, 15]},
-    "640x480":   {"width": 640,  "height": 480, "fps_options": [90, 60, 30]},
-    "640x360":   {"width": 640,  "height": 360, "fps_options": [90, 60, 30]},
+    # Verified by test_camera_modes.py — 45/45 PASS
+    "1280x800": {"width": 1280, "height": 800, "fps_options": [60, 30, 15]},
+    "1280x720": {"width": 1280, "height": 720, "fps_options": [60, 30, 15]},
+    "848x480":  {"width": 848,  "height": 480, "fps_options": [60, 30, 15]},
+    "640x480":  {"width": 640,  "height": 480, "fps_options": [90, 60, 30, 15]},
+    "640x400":  {"width": 640,  "height": 400, "fps_options": [90, 60, 30, 15]},
+    "640x360":  {"width": 640,  "height": 360, "fps_options": [90, 60, 30, 15]},
+    "480x270":  {"width": 480,  "height": 270, "fps_options": [90, 60, 30, 15]},
+    "424x240":  {"width": 424,  "height": 240, "fps_options": [90, 60, 30, 15]},
+}
+
+# RealSense D405 specs (depth camera with RGB from depth module)
+D405_USB_VID = "8086"
+D405_USB_PID = "0b5b"
+
+D405_SPECS = {
+    "model": "RealSense D405",
+    "sensor": "Global Shutter OV9282",
+    "shutter": "Global Shutter",
+    "h_fov": 87.0, "v_fov": 58.0, "d_fov": 0,
+    "fourcc": "YUYV",
+}
+
+D405_MODES = {
+    # Verified by test_camera_modes.py — 15/15 PASS (YUYV only, no MJPG)
+    "1280x720": {"width": 1280, "height": 720, "fps_options": [15]},
+    "848x480":  {"width": 848,  "height": 480, "fps_options": [10]},
+    "640x480":  {"width": 640,  "height": 480, "fps_options": [30, 15]},
+    "480x270":  {"width": 480,  "height": 270, "fps_options": [30, 15]},
+    "424x240":  {"width": 424,  "height": 240, "fps_options": [60, 30, 15]},
+}
+
+# HBVCAM Head Stereo Camera specs (AR0234 Global Shutter, side-by-side output)
+HBVCAM_USB_VID = "1bcf"
+HBVCAM_USB_PID = "2d4f"
+
+HBVCAM_CAMERAS = {
+    "HBVCAM-F2439GS": {
+        "baseline_mm": 60.0,
+        "sensor": "AR0234 2MP CMOS Global Shutter",
+        "fov": {
+            "WUXGA":  {"h_fov": 0, "v_fov": 0, "d_fov": 0},
+            "HD1080": {"h_fov": 0, "v_fov": 0, "d_fov": 0},
+            "HD720":  {"h_fov": 0, "v_fov": 0, "d_fov": 0},
+            "VGA":    {"h_fov": 0, "v_fov": 0, "d_fov": 0},
+        },
+    },
+}
+
+HBVCAM_MODES = {
+    # Verified by test_camera_modes.py — only 3840x1080@60fps fails (V4L2 timeout)
+    # Stereo double-width (per-eye = width/2)
+    "WUXGA":    {"width": 3840, "height": 1200, "fps_options": [50, 30, 25, 20, 15]},
+    "HD1080":   {"width": 3840, "height": 1080, "fps_options": [50, 30, 25, 20, 15]},
+    "HD720":    {"width": 2560, "height": 720,  "fps_options": [60, 50, 30, 25, 20]},
+    # Half-width stereo (per-eye = width/2, smaller per-eye)
+    "960x1200": {"width": 1920, "height": 1200, "fps_options": [60, 50, 30, 25, 20, 15]},
+    "960x1080": {"width": 1920, "height": 1080, "fps_options": [60, 50, 30, 25, 20, 15]},
+    "640x720":  {"width": 1280, "height": 720,  "fps_options": [60, 50, 30, 25, 20, 15]},
+    "VGA":      {"width": 1280, "height": 480,  "fps_options": [60, 50, 30, 25, 20]},
+    "320x480":  {"width":  640, "height": 480,  "fps_options": [60, 50, 30, 25, 20, 15]},
 }
 
 
@@ -175,16 +229,70 @@ def start_https_server(serve_dir, cert_file, key_file, port):
 
 # ==================== Auto-Detection ====================
 
-def auto_detect_zed():
-    """Find ZED device index. Returns (device_index, model_name) or None."""
-    # Check udev symlink first
+def _check_usb_vid_pid(video_idx, expected_vid, expected_pid):
+    """Check if a video device matches the expected USB VID:PID via sysfs."""
+    device_link = f"/sys/class/video4linux/video{video_idx}/device"
+    if not os.path.exists(device_link):
+        return False
+    real_path = os.path.realpath(device_link)
+    path = real_path
+    for _ in range(5):
+        vid_file = os.path.join(path, "idVendor")
+        pid_file = os.path.join(path, "idProduct")
+        if os.path.exists(vid_file) and os.path.exists(pid_file):
+            try:
+                with open(vid_file) as f:
+                    vid = f.read().strip()
+                with open(pid_file) as f:
+                    pid = f.read().strip()
+                return vid == expected_vid and pid == expected_pid
+            except Exception:
+                return False
+        path = os.path.dirname(path)
+    return False
+
+
+def auto_detect_hbvcam():
+    """Find HBVCAM head stereo camera by USB VID:PID. Returns device_index or None."""
+    # Method 1: udev symlink
     if os.path.exists("/dev/stereo_camera"):
         real = os.path.realpath("/dev/stereo_camera")
         try:
             idx = int(real.replace("/dev/video", ""))
-            model = _detect_zed_model()
-            logger.info(f"Found udev symlink /dev/stereo_camera -> /dev/video{idx}")
-            return idx, model
+            if _check_usb_vid_pid(idx, HBVCAM_USB_VID, HBVCAM_USB_PID):
+                logger.info(f"Found HBVCAM via /dev/stereo_camera -> /dev/video{idx}")
+                return idx
+        except ValueError:
+            pass
+    # Method 2: scan all video devices by VID:PID
+    for path in sorted(globmod.glob("/sys/class/video4linux/video*/name")):
+        try:
+            idx = int(path.split("video4linux/video")[1].split("/")[0])
+            if not _check_usb_vid_pid(idx, HBVCAM_USB_VID, HBVCAM_USB_PID):
+                continue
+            result = subprocess.run(
+                ["v4l2-ctl", "-d", f"/dev/video{idx}", "--list-formats"],
+                capture_output=True, text=True, timeout=3
+            )
+            if "MJPG" in result.stdout or "YUYV" in result.stdout:
+                logger.info(f"Auto-detected HBVCAM at /dev/video{idx}")
+                return idx
+        except Exception:
+            continue
+    return None
+
+
+def auto_detect_zed():
+    """Find ZED device index. Returns (device_index, model_name) or None."""
+    # Check udev symlink first (skip if it's an HBVCAM)
+    if os.path.exists("/dev/stereo_camera"):
+        real = os.path.realpath("/dev/stereo_camera")
+        try:
+            idx = int(real.replace("/dev/video", ""))
+            if not _check_usb_vid_pid(idx, HBVCAM_USB_VID, HBVCAM_USB_PID):
+                model = _detect_zed_model()
+                logger.info(f"Found udev symlink /dev/stereo_camera -> /dev/video{idx}")
+                return idx, model
         except ValueError:
             pass
     # Scan sysfs
@@ -239,6 +347,31 @@ def auto_detect_orbbec():
     return None
 
 
+def auto_detect_d405():
+    """Find RealSense D405 RGB device index. Returns device_idx or None."""
+    for path in sorted(globmod.glob("/sys/class/video4linux/video*/name")):
+        try:
+            with open(path) as f:
+                name = f.read().strip().lower()
+            if "realsense" not in name:
+                continue
+            idx = int(path.split("video4linux/video")[1].split("/")[0])
+            if not _check_usb_vid_pid(idx, D405_USB_VID, D405_USB_PID):
+                continue
+            result = subprocess.run(
+                ["v4l2-ctl", "-d", f"/dev/video{idx}", "--list-formats"],
+                capture_output=True, text=True, timeout=3
+            )
+            fmts = result.stdout
+            # D405 RGB device has YUYV but not depth formats (GREY, Z16)
+            if "YUYV" in fmts and "GREY" not in fmts and "Z16" not in fmts:
+                logger.info(f"Auto-detected RealSense D405 RGB=/dev/video{idx}")
+                return idx
+        except Exception:
+            continue
+    return None
+
+
 def detect_camera(force_type=None, zed_device=None, orbbec_rgb=None):
     """Detect connected camera and return appropriate backend, or None for test mode."""
     if force_type == 'orbbec':
@@ -247,7 +380,15 @@ def detect_camera(force_type=None, zed_device=None, orbbec_rgb=None):
             rgb = auto_detect_orbbec()
             if rgb is None:
                 rgb = 6  # fallback default
-        return OrbbecBackend(rgb)
+        return SingleCameraBackend(rgb, ORBBEC_SPECS, ORBBEC_MODES)
+
+    if force_type == 'realsense':
+        idx = zed_device  # reuse --device flag
+        if idx is None:
+            idx = auto_detect_d405()
+            if idx is None:
+                idx = 6  # fallback default
+        return SingleCameraBackend(idx, D405_SPECS, D405_MODES)
 
     if force_type == 'zed':
         idx = zed_device if zed_device is not None else 0
@@ -255,10 +396,26 @@ def detect_camera(force_type=None, zed_device=None, orbbec_rgb=None):
         model = result[1] if result else "Generic Stereo"
         return ZEDBackend(idx, model)
 
-    # Auto-detect: try Orbbec first (more specific), then ZED
+    if force_type == 'hbvcam':
+        idx = zed_device  # reuse --device flag
+        if idx is None:
+            idx = auto_detect_hbvcam()
+            if idx is None:
+                idx = 0  # fallback default
+        return ZEDBackend(idx, "HBVCAM-F2439GS", modes_dict=HBVCAM_MODES)
+
+    # Auto-detect priority: HBVCAM > Orbbec > D405 > ZED > test mode
+    hbvcam_idx = auto_detect_hbvcam()
+    if hbvcam_idx is not None:
+        return ZEDBackend(hbvcam_idx, "HBVCAM-F2439GS", modes_dict=HBVCAM_MODES)
+
     orbbec_rgb_idx = auto_detect_orbbec()
     if orbbec_rgb_idx is not None:
-        return OrbbecBackend(orbbec_rgb_idx)
+        return SingleCameraBackend(orbbec_rgb_idx, ORBBEC_SPECS, ORBBEC_MODES)
+
+    d405_idx = auto_detect_d405()
+    if d405_idx is not None:
+        return SingleCameraBackend(d405_idx, D405_SPECS, D405_MODES)
 
     zed = auto_detect_zed()
     if zed:
@@ -271,28 +428,40 @@ def detect_camera(force_type=None, zed_device=None, orbbec_rgb=None):
 # ==================== Camera Backends ====================
 
 class ZEDBackend:
-    """ZED stereo camera (side-by-side output via single UVC device)."""
+    """Side-by-side stereo camera (ZED / HBVCAM / generic UVC stereo)."""
     camera_type = "stereo"
 
-    def __init__(self, device_index=0, model="Generic Stereo"):
+    def __init__(self, device_index=0, model="Generic Stereo", modes_dict=None):
         self.device_index = device_index
         self.camera_model = model
-        self.camera_specs = ZED_CAMERAS.get(model, ZED_CAMERAS["Generic Stereo"])
+        if model in ZED_CAMERAS:
+            self.camera_specs = ZED_CAMERAS[model]
+        elif model in HBVCAM_CAMERAS:
+            self.camera_specs = HBVCAM_CAMERAS[model]
+        else:
+            self.camera_specs = ZED_CAMERAS["Generic Stereo"]
+        self.modes_dict = modes_dict if modes_dict is not None else ZED_MODES
         self.cap = None
         self.test_mode = False
-        self.current_resolution = "HD720"
-        self.current_fps = 60
+        # Default: HD720 if available, else first mode
+        if "HD720" in self.modes_dict:
+            self.current_resolution = "HD720"
+            self.current_fps = self.modes_dict["HD720"]["fps_options"][0]
+        else:
+            first = next(iter(self.modes_dict))
+            self.current_resolution = first
+            self.current_fps = self.modes_dict[first]["fps_options"][0]
 
     def get_modes(self):
-        return {k: v["fps_options"] for k, v in ZED_MODES.items()}
+        return {k: v["fps_options"] for k, v in self.modes_dict.items()}
 
     def open(self, resolution, fps):
-        mode = ZED_MODES.get(resolution)
+        mode = self.modes_dict.get(resolution)
         if not mode:
             return False
         self.cap = cv2.VideoCapture(self.device_index)
         if not self.cap.isOpened():
-            logger.warning("Cannot open ZED camera, using test mode")
+            logger.warning(f"Cannot open {self.camera_model} camera, using test mode")
             self.test_mode = True
             self.current_resolution = resolution
             self.current_fps = fps
@@ -304,7 +473,7 @@ class ZEDBackend:
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         ret, _ = self.cap.read()
         if not ret:
-            logger.warning("ZED read failed, using test mode")
+            logger.warning(f"{self.camera_model} read failed, using test mode")
             self.cap.release()
             self.cap = None
             self.test_mode = True
@@ -343,7 +512,8 @@ class ZEDBackend:
         return None
 
     def build_camera_info(self):
-        mode = ZED_MODES.get(self.current_resolution, ZED_MODES["HD720"])
+        fallback = next(iter(self.modes_dict.values()))
+        mode = self.modes_dict.get(self.current_resolution, fallback)
         fov = self.camera_specs["fov"].get(self.current_resolution, {"h_fov": 0, "v_fov": 0, "d_fov": 0})
         if self.cap and not self.test_mode:
             actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -371,14 +541,19 @@ class ZEDBackend:
             self.camera_model = model
             self.camera_specs = ZED_CAMERAS[model]
             return True
+        if model in HBVCAM_CAMERAS:
+            self.camera_model = model
+            self.camera_specs = HBVCAM_CAMERAS[model]
+            return True
         return False
 
     def validate_mode(self, res, fps):
-        mode = ZED_MODES.get(res)
+        mode = self.modes_dict.get(res)
         return mode and fps in mode["fps_options"]
 
     def generate_test_frames(self):
-        mode = ZED_MODES.get(self.current_resolution, ZED_MODES["HD720"])
+        fallback = next(iter(self.modes_dict.values()))
+        mode = self.modes_dict.get(self.current_resolution, fallback)
         w, h = mode["width"] // 2, mode["height"]
         left = np.zeros((h, w, 3), dtype=np.uint8)
         right = np.zeros((h, w, 3), dtype=np.uint8)
@@ -400,44 +575,51 @@ class ZEDBackend:
         }
 
     def startup_info(self):
-        return [
+        lines = [
             f"  Camera : {self.camera_model}",
+            f"  Sensor : {self.camera_specs['sensor']}",
             f"  Mode   : {self.current_resolution} @ {self.current_fps}fps",
             f"  Device : /dev/video{self.device_index}",
         ]
+        return lines
 
 
-class OrbbecBackend:
-    """Orbbec Gemini 335L (separate RGB + IR UVC devices).
-    IR runs in a dedicated thread to avoid blocking RGB capture."""
-    camera_type = "orbbec"
-    camera_model = "Gemini 335L"
+class SingleCameraBackend:
+    """Generic single-camera (RGB) backend — Orbbec Gemini 335L, RealSense D405, etc."""
+    camera_type = "single"
 
-    def __init__(self, rgb_device=6):
-        self.rgb_device = rgb_device
+    def __init__(self, device_idx, specs, modes_dict):
+        self.rgb_device = device_idx
+        self.camera_model = specs["model"]
+        self.specs = specs
+        self.modes_dict = modes_dict
+        self.fourcc_str = specs.get("fourcc", "MJPG")
         self.rgb_cap = None
         self.test_mode = False
-        self.current_resolution = "1280x800"
-        self.current_fps = 30
+        # Default to first mode
+        first = next(iter(modes_dict))
+        self.current_resolution = first
+        self.current_fps = modes_dict[first]["fps_options"][0]
 
     def get_modes(self):
-        return {k: v["fps_options"] for k, v in ORBBEC_MODES.items()}
+        return {k: v["fps_options"] for k, v in self.modes_dict.items()}
 
     def open(self, resolution, fps):
-        mode = ORBBEC_MODES.get(resolution)
+        mode = self.modes_dict.get(resolution)
         if not mode:
             return False
 
         rgb_path = f"/dev/video{self.rgb_device}"
         self.rgb_cap = cv2.VideoCapture(rgb_path, cv2.CAP_V4L2)
         if not self.rgb_cap.isOpened():
-            logger.warning("Cannot open Orbbec RGB camera, using test mode")
+            logger.warning(f"Cannot open {self.camera_model}, using test mode")
             self.test_mode = True
             self.current_resolution = resolution
             self.current_fps = fps
             return True
 
-        self.rgb_cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+        cc = cv2.VideoWriter_fourcc(*self.fourcc_str)
+        self.rgb_cap.set(cv2.CAP_PROP_FOURCC, cc)
         self.rgb_cap.set(cv2.CAP_PROP_FRAME_WIDTH, mode["width"])
         self.rgb_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, mode["height"])
         self.rgb_cap.set(cv2.CAP_PROP_FPS, fps)
@@ -445,7 +627,7 @@ class OrbbecBackend:
 
         ret, _ = self.rgb_cap.read()
         if not ret:
-            logger.warning("Orbbec RGB read failed, using test mode")
+            logger.warning(f"{self.camera_model} read failed, using test mode")
             self.rgb_cap.release()
             self.rgb_cap = None
             self.test_mode = True
@@ -464,7 +646,7 @@ class OrbbecBackend:
             self.rgb_cap = None
 
     def read_frames(self):
-        """Returns (rgb, rgb) — both channels show RGB."""
+        """Returns (rgb, rgb) — both channels show same RGB frame."""
         if self.test_mode:
             return self.generate_test_frames()
         ret, rgb = self.rgb_cap.read()
@@ -480,20 +662,21 @@ class OrbbecBackend:
         return None
 
     def build_camera_info(self):
-        mode = ORBBEC_MODES.get(self.current_resolution, ORBBEC_MODES["1280x800"])
-        color_fov = ORBBEC_SPECS["fov"]["color"]
+        fallback = next(iter(self.modes_dict.values()))
+        mode = self.modes_dict.get(self.current_resolution, fallback)
         if self.rgb_cap and not self.test_mode:
             w = int(self.rgb_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(self.rgb_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             actual_fps = self.rgb_cap.get(cv2.CAP_PROP_FPS)
         else:
             w, h, actual_fps = mode["width"], mode["height"], self.current_fps
-        return {
-            "model": "Gemini 335L" if not self.test_mode else "Test Mode (Gemini 335L)",
-            "baseline": ORBBEC_SPECS["baseline_mm"],
-            "sensor": ORBBEC_SPECS["sensor"],
-            "shutter": ORBBEC_SPECS["shutter"],
-            "h_fov": color_fov["h_fov"], "v_fov": color_fov["v_fov"], "d_fov": color_fov["d_fov"],
+        model = self.camera_model if not self.test_mode else f"Test Mode ({self.camera_model})"
+        info = {
+            "model": model,
+            "sensor": self.specs["sensor"],
+            "h_fov": self.specs.get("h_fov", 0),
+            "v_fov": self.specs.get("v_fov", 0),
+            "d_fov": self.specs.get("d_fov", 0),
             "width": w, "height": h,
             "stereo_width": w * 2,
             "resolution": self.current_resolution,
@@ -502,16 +685,20 @@ class OrbbecBackend:
             "available_modes": self.get_modes(),
             "test_mode": self.test_mode,
         }
+        if self.specs.get("shutter"):
+            info["shutter"] = self.specs["shutter"]
+        return info
 
     def set_camera_model(self, model):
-        return False  # Orbbec model is fixed
+        return False  # fixed model
 
     def validate_mode(self, res, fps):
-        mode = ORBBEC_MODES.get(res)
+        mode = self.modes_dict.get(res)
         return mode and fps in mode["fps_options"]
 
     def generate_test_frames(self):
-        mode = ORBBEC_MODES.get(self.current_resolution, ORBBEC_MODES["1280x800"])
+        fallback = next(iter(self.modes_dict.values()))
+        mode = self.modes_dict.get(self.current_resolution, fallback)
         w, h = mode["width"], mode["height"]
         frame = np.zeros((h, w, 3), dtype=np.uint8)
         frame[:, :] = (40, 120, 80)
@@ -520,7 +707,7 @@ class OrbbecBackend:
         cv2.putText(frame, "RGB (Test)", (50, 80), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
         cv2.putText(frame, info, (50, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 200), 2)
         cv2.putText(frame, ts, (50, 190), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.putText(frame, "Gemini 335L | Global Shutter", (50, 240),
+        cv2.putText(frame, f"{self.camera_model} | {self.specs.get('shutter', '')}", (50, 240),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (150, 150, 150), 2)
         return frame, frame
 
@@ -532,14 +719,17 @@ class OrbbecBackend:
         }
 
     def startup_info(self):
-        return [
-            f"  Camera  : Gemini 335L",
-            f"  Sensor  : {ORBBEC_SPECS['sensor']}",
-            f"  Shutter : {ORBBEC_SPECS['shutter']}",
-            f"  Mode    : {self.current_resolution} @ {self.current_fps}fps",
-            f"  RGB FOV : H{ORBBEC_SPECS['fov']['color']['h_fov']}° x V{ORBBEC_SPECS['fov']['color']['v_fov']}°",
-            f"  RGB Dev : /dev/video{self.rgb_device}",
+        lines = [
+            f"  Camera : {self.camera_model}",
+            f"  Sensor : {self.specs['sensor']}",
         ]
+        if self.specs.get("shutter"):
+            lines.append(f"  Shutter: {self.specs['shutter']}")
+        lines.append(f"  Mode   : {self.current_resolution} @ {self.current_fps}fps")
+        if self.specs.get("h_fov"):
+            lines.append(f"  FOV    : H{self.specs['h_fov']}° x V{self.specs['v_fov']}°")
+        lines.append(f"  Device : /dev/video{self.rgb_device}")
+        return lines
 
 
 # ==================== Monitor Server ====================
@@ -797,7 +987,7 @@ class MonitorServer:
         ssl_ctx = get_ssl_context(script_dir)
 
         local_ip = get_local_ip()
-        title = "Orbbec Gemini 335L Monitor" if self.backend.camera_type == "orbbec" else "Camera Monitor"
+        title = f"{self.backend.camera_model} Monitor"
         print("\n" + "=" * 60)
         print(f"  {title}")
         print("=" * 60)
@@ -851,17 +1041,19 @@ async def run_server(backend):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Unified Camera Monitor — auto-detects ZED stereo or Orbbec Gemini 335L',
+        description='Unified Camera Monitor — auto-detects HBVCAM / ZED / Orbbec / RealSense',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   python monitor.py                              # auto-detect camera
+  python monitor.py --type hbvcam --device 0     # force HBVCAM head stereo
   python monitor.py --type zed --device 0        # force ZED mode
   python monitor.py --type orbbec --rgb 6        # force Orbbec with specific device
+  python monitor.py --type realsense --device 6  # force RealSense D405
 """)
-    parser.add_argument('--type', '-t', choices=['zed', 'orbbec'],
+    parser.add_argument('--type', '-t', choices=['zed', 'orbbec', 'hbvcam', 'realsense'],
                         help='Force camera type (auto-detect if omitted)')
     parser.add_argument('--device', '-d', type=int, default=None,
-                        help='ZED device index')
+                        help='Device index (for ZED/HBVCAM/RealSense)')
     parser.add_argument('--rgb', type=int, default=None,
                         help='Orbbec RGB device index')
     args = parser.parse_args()
