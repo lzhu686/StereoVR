@@ -865,12 +865,14 @@ class MonitorServer:
         logger.info("Capture thread stopped")
 
     def _reconnect(self):
-        """Attempt to reconnect to the camera after disconnect."""
+        """Attempt to reconnect — tries same camera first, then auto-detects others."""
         self.disconnected = True
         logger.warning("Camera disconnected, attempting reconnect...")
 
         res = self.backend.current_resolution
         fps = self.backend.current_fps
+        same_camera_attempts = 0
+        REDETECT_AFTER = 3  # try same camera N times, then scan for any camera
 
         while self.is_running:
             try:
@@ -883,32 +885,64 @@ class MonitorServer:
             if not self.is_running:
                 break
 
-            try:
-                opened = self.backend.open(res, fps)
-                # open() may fall back to test_mode — that's not a real reconnect
-                if opened and not getattr(self.backend, 'test_mode', False):
-                    # Verify with a test read
-                    test = self.backend.read_frames()
-                    if test is not None:
-                        with self.frame_lock:
-                            self.latest_left = test[0].copy()
-                            self.latest_right = test[1].copy()
-                            self.frame_id += 1
-                        self.disconnected = False
-                        self.camera_info = self.backend.build_camera_info()
-                        logger.info("Camera reconnected successfully")
-                        return
+            # --- Phase 1: try to reopen the SAME camera ---
+            if same_camera_attempts < REDETECT_AFTER:
+                same_camera_attempts += 1
+                try:
+                    opened = self.backend.open(res, fps)
+                    if opened and not getattr(self.backend, 'test_mode', False):
+                        test = self.backend.read_frames()
+                        if test is not None:
+                            with self.frame_lock:
+                                self.latest_left = test[0].copy()
+                                self.latest_right = test[1].copy()
+                                self.frame_id += 1
+                            self.disconnected = False
+                            self.camera_info = self.backend.build_camera_info()
+                            logger.info("Camera reconnected successfully")
+                            return
+                        else:
+                            self.backend.close()
                     else:
-                        # open succeeded but read failed, close and retry
-                        self.backend.close()
-                else:
-                    # Opened in test mode — not a real camera, close and retry
-                    if opened:
-                        self.backend.close()
-            except Exception as e:
-                logger.warning(f"Reconnect attempt failed: {e}")
+                        if opened:
+                            self.backend.close()
+                except Exception as e:
+                    logger.warning(f"Reconnect attempt failed: {e}")
+                logger.info(f"Same camera retry {same_camera_attempts}/{REDETECT_AFTER} failed...")
+                continue
 
-            logger.info("Reconnect failed, retrying in 2s...")
+            # --- Phase 2: auto-detect ANY camera (cross-camera hot-plug) ---
+            try:
+                new_backend = detect_camera()
+                if new_backend is not None:
+                    # Found a camera — may be the same type or different
+                    new_res = new_backend.current_resolution
+                    new_fps = new_backend.current_fps
+                    if new_backend.open(new_res, new_fps):
+                        if not getattr(new_backend, 'test_mode', False):
+                            test = new_backend.read_frames()
+                            if test is not None:
+                                old_model = self.backend.camera_model
+                                self.backend = new_backend
+                                with self.frame_lock:
+                                    self.latest_left = test[0].copy()
+                                    self.latest_right = test[1].copy()
+                                    self.frame_id += 1
+                                self.disconnected = False
+                                self.camera_info = self.backend.build_camera_info()
+                                if self.backend.camera_model != old_model:
+                                    logger.info(f"Switched camera: {old_model} -> {self.backend.camera_model}")
+                                else:
+                                    logger.info("Camera reconnected successfully")
+                                return
+                            else:
+                                new_backend.close()
+                        else:
+                            new_backend.close()
+            except Exception as e:
+                logger.warning(f"Auto-detect attempt failed: {e}")
+
+            logger.info("Reconnect failed (scanning all cameras), retrying in 2s...")
 
     # ---- Snapshot ----
 
